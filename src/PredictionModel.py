@@ -8,7 +8,7 @@ class PredictionModel():
     '''
 
     def __init__(self,
-                 modelName:str,folder='.',ontoDate:str='2022',numFolds:int=4,
+                 modelName:str,folder='.',ontoDate:str = '2022-06-15',numFolds:int=4,
                  inputData:str='x',outputTerms:str='b',addtionalOutputs:list[str]=[],
                  networkStructure:str='500x200x100',activationFunc:str='ReLU',lossFunc:str='BCE',
                  lr:float=0.01,batchSize:int=50,momentum:float=0.9,

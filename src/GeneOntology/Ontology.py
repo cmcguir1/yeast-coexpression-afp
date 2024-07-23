@@ -3,7 +3,9 @@ from Gene import Gene
 import urllib.request
 
 class Ontology:
-    def __init__(self, oboFileName=None, annoFileName=None, loadLocal=False,bypassOrigCheck=False):
+    def __init__(self,oboFileName=None,annoFileName=None,
+                 loadLocal=False,bypassOrigCheck=False,
+                 annotateTerms=False):
         self.originalCheck = not bypassOrigCheck
         
         #Fields
@@ -20,6 +22,29 @@ class Ontology:
             self.loadOboFile(oboFileName, loadLocal)
             if annoFileName is not None:
                 self.loadAnnoFile(annoFileName, loadLocal)
+
+        self.assignChildren()
+        self.assginYORF()
+        if annotateTerms:
+            for _, gene in self.genes.items():
+                gene.annotateTerms()
+
+    # I wrote this method
+    def assignChildren(self):
+        for id, term in self.terms.items():
+            for parent in term.parents():
+                parent.children.add(term)
+
+    # I wrote this method
+    def assginYORF(self):
+        for id, gene in self.genes.items():
+            for alias in gene.aliases:
+                if Ontology.isYORF(alias):
+                    self.yorfs[alias] = gene
+
+    # I wrote this method. It checks if a gene name is a YORF
+    def isYORF(name):
+        return (len(name) >= 7 and name[0] == 'Y' and (name[2] == 'L' or name[2] == 'R') and name[3:5].isdigit() and (name[6] == 'W' or name[6] == 'C'))
 
 
     def loadOboFile(self, oboFileName, loadLocal=False):
