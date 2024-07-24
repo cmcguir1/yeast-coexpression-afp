@@ -99,17 +99,44 @@ class PredictionModel():
         np.random.shuffle(goldStandard)
 
         table = []
-        genePerFold = len(goldStandard) // self.numFolds
         # Assign each gene to numFolds evenly sized folds, then save it to a csv file
-        for i in range(self.numFolds):
-            start = i * genePerFold
-            end = (i + 1) * genePerFold if i != self.numFolds - 1 else len(goldStandard)
-            for j in range(start,end):
-                table.append([goldStandard[j],i])
+        
+        for i in range(len(goldStandard)):
+            table.append([goldStandard[i],i % self.numFolds])
+        table.sort(key=lambda x: x[1])
         pd.DataFrame(table,columns=['Gene','Fold']).to_csv(fileName,index=False)
             
         # Load the gene folds from the file that was just created
         return self.loadGeneFoldsFromFile(fileName)
+    
+
+    # ----------------------------------- Unit Tests ----------------------------------- #
+    def hasIndependentGeneFolds(self):
+        ''' 
+        Tests if a model's gene folds are indepdent of one another, that is, they share no overlap in their set of genes
+        '''
+        for i in range(self.numFolds):
+            for j in range(i+1,self.numFolds):
+                if len(self.geneFolds[i] & self.geneFolds[j]) != 0:
+                    return False
+        return True
+    
+    def geneFoldsCoverGoldStandard(self):
+        ''' 
+        Tests if a model's gene folds cover the entire gold standard set of genes
+        '''
+        return len(set.union(*self.geneFolds)) == len(self.goldStandard)
+    
+    def geneFoldsHaveEqualSize(self):
+        '''
+        Tests if a model's gene folds are roughly equal in size. This means that each fold is within 1 gene of all other gene folds.
+        '''
+
+        for i in range(self.numFolds):
+            for j in range(i+1,self.numFolds):
+                if abs(len(self.geneFolds[i]) - len(self.geneFolds[j])) > 1:
+                    return False
+        return True
             
 
 
