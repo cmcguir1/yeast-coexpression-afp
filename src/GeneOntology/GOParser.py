@@ -7,7 +7,7 @@ class GOParser():
     This class parses and modify Ontology objects to create the slim leaf terms object used in extensively in the PredictionModel class. It also contains a method to get all gene yorfs annotated to a particular term.
     '''
 
-    def __init__(self,ontologyDate,slimFile='./data/GO/goslim_yeast.obo'):
+    def __init__(self,ontologyDate,slimFile='goslim_yeast.obo'):
         '''
         Initialization of GOParser object.
 
@@ -22,6 +22,7 @@ class GOParser():
             ontologyFile = f'{packageDir}/data/GO/{ontologyDate}/gene_ontology.obo'
 
         annotationsFile = f'{packageDir}/data/GO/{ontologyDate}/sgd.gaf'
+        slimFile = f'{packageDir}/data/GO/{slimFile}'
         
         # Create onotology and slim ontology objects
         self.ontology = Ontology(ontologyFile,annotationsFile,loadLocal=True)
