@@ -109,8 +109,10 @@ class PredictionModel():
         # Load the gene folds from the file that was just created
         return self.loadGeneFoldsFromFile(fileName)
     
-
+    
+    # ---------------------------------------------------------------------------------- #
     # ----------------------------------- Unit Tests ----------------------------------- #
+    # ---------------------------------------------------------------------------------- #
     def hasIndependentGeneFolds(self):
         ''' 
         Tests if a model's gene folds are indepdent of one another, that is, they share no overlap in their set of genes
