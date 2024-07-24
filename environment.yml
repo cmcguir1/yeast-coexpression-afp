@@ -1,6 +1,7 @@
 name: base
 channels:
   - pytorch
+  - conda-forge
   - defaults
 dependencies:
   - _ipyw_jlab_nb_ext_conf=0.1.0=py39haa95532_0
