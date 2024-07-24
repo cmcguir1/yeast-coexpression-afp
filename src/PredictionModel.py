@@ -2,8 +2,6 @@ import pandas as pd
 import numpy as np
 import os
 
-
-
 from GeneOntology.GOParser import GOParser
 
 class PredictionModel():
@@ -14,7 +12,7 @@ class PredictionModel():
     def __init__(self,
                  modelName:str,folder='.',ontologyDate:str = '2022-06-15',numFolds:int=4,
                  inputData:str='x',outputTerms:str='b',addtionalOutputs:list[str]=[],
-                 networkStructure:str='500x200x100',activationFunc:str='ReLU',lossFunc:str='BCE',
+                 hiddenStructure:str='500x200x100',activationFunc:str='ReLU',lossFunc:str='BCE',
                  lr:float=0.01,batchSize:int=50,momentum:float=0.9,
                  weightDecay:float=0.0,inputDropout:float=None,hiddenDropout:float=None,
                  goldStandardFile:str=None
@@ -39,7 +37,7 @@ class PredictionModel():
                 m - molecular function
             -addtionalOutputs - list of additional GO terms to include in the model predictions
 
-            -networkStructure - string of integers separated by 'x' specifying the number of nodes in each hidden layer of the neural network
+            -hiddenStructure - string of integers separated by 'x' specifying the number of nodes in each hidden layer of the neural network
             -activationFunc - the activation function to used in each hidden layer of the neural networks
             -lossFunc - loss function used to train neural network. By default, the model uses a binary cross entropy with logits loss function.
 
@@ -78,6 +76,9 @@ class PredictionModel():
             self.geneFolds = self.loadGeneFoldsFromFile(gsFile)
         else:
             self.geneFolds = self.createNewGeneFolds(gsFile)
+
+        # Initialize model input data
+
         
 
     def loadGeneFoldsFromFile(self,fileName:str) -> list[set[str]]:
