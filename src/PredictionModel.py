@@ -124,9 +124,7 @@ class PredictionModel():
         return True
     
     def geneFoldsCoverGoldStandard(self):
-        ''' 
-        Tests if a model's gene folds cover the entire gold standard set of genes
-        '''
+        '''  Tests if a model's gene folds cover the entire gold standard set of genes '''
         return len(set.union(*self.geneFolds)) == len(self.goldStandard)
     
     def geneFoldsHaveEqualSize(self):
