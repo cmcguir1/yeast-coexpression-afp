@@ -16,7 +16,7 @@ class PredictionModel():
     def __init__(self,
                  modelName:str,folder='.',ontologyDate:str = '2007-01-01',numFolds:int=4,
                  inputData:str='x',outputTerms:str='b',addtionalOutputs:list[str]=[],
-                 hiddenStructure:list[int]=[500,200,100],activationFunc:str='ReLU',lossFunc:str='BCE',
+                 hiddenStructure:list[int]=[500,200,100],activationFunc=torch.nn.ReLU(),
                  goldStandardFile:str=None,datasetMode:str='2007',datasetsFile:str=None
                  ):
         '''
@@ -80,8 +80,6 @@ class PredictionModel():
         else:
             self.geneFolds = self.createNewGeneFolds(gsFile)
 
-        print(self.geneFolds)
-
         # Initialize model input data
         self.expressionData = GeneExpressionData(genes=self.allGenes,datasetMode=datasetMode,datasetsFile=datasetsFile)
 
@@ -111,14 +109,15 @@ class PredictionModel():
         network = self.networks[fold]
         network.train()
         
-        lossFunction = torch.nn.BCEWithLogitsLoss()
+        lossFunction = torch.nn.BCEWithLogitsLoss(reduction='mean')
         optimizer = torch.optim.SGD(network.parameters(),lr=lr,momentum=momentum)
 
+        # Get training and testing gene split for fold, then turn each into sets of positive and negative gene pairs
         trainGenes, testGenes = self.getDataSplit(fold)
+        trainPosPairs, trainNegPairs = self.splitPosNegPairs(trainGenes)
+        testPosPairs, testNegPairs = self.splitPosNegPairs(testGenes)
 
-        trainPosPairs, trainNegPairs = self.splitPosNegPairs(list(trainGenes))
-        testPosPairs, testNegPairs = self.splitPosNegPairs(list(testGenes))
-
+        # Initialize loss table to keep track of training and tessting loss over time
         lossTable = []
         runningLoss = 0.0
 
@@ -127,15 +126,16 @@ class PredictionModel():
             features = self.featuresVector(batch)
             labels = self.labelsVector(batch)
 
+            # Reset gradients, perform forward pass, calculate loss, and backpropagate
             optimizer.zero_grad()
             outputs = network(features)
-
             loss = lossFunction(outputs, labels)
             loss.backward()
             optimizer.step()
 
             runningLoss += loss.item()
 
+            # Every 1000 batches, evaluate the model on the test set and save the loss
             if i % 1000 == 0:
                 with torch.no_grad():
                     testBatch =self.createBatch(testPosPairs,testNegPairs,batchSize*100)
@@ -147,9 +147,10 @@ class PredictionModel():
 
                     if(i == 0):
                         runningLoss *= 1000
-                    lossTable.append((i,runningLoss,testLoss.item()))
+                    lossTable.append((i,runningLoss,testLoss.item() * 1000))
                     runningLoss = 0.0
         
+        # Save network's weights and the loss table in model's folder
         torch.save(network.state_dict(),f'{self.modelFolder}/Network_fold{fold}.pth')
         pd.DataFrame(lossTable,columns=['Batch','Train Loss','Test Loss']).to_csv(f'{self.modelFolder}/Loss_fold{fold}.csv',index=False)
 
@@ -186,41 +187,46 @@ class PredictionModel():
         # Load the gene folds from the file that was just created
         return self.loadGeneFoldsFromFile(fileName)
     
-    def getDataSplit(self,fold:int) -> tuple[set[str],set[str]]:
+    def getDataSplit(self,fold:int) -> tuple[np.ndarray,np.ndarray]:
         '''
         Returns the tuple of the training and testing gene sets (in that order) for a given fold
         '''
-        testGenes = set()
-        trainGenes = set()
+        testGenes = []
+        trainGenes = []
         for i in range(self.numFolds):
             if i == fold:
-                testGenes = self.geneFolds[i]
+                testGenes = list(self.geneFolds[i])
             else:
-                trainGenes = trainGenes.union(self.geneFolds[i])
+                trainGenes += list(self.geneFolds[i])
 
-        return trainGenes,testGenes
-    
+        return np.array(trainGenes,dtype='U10'),np.array(testGenes,dtype='U10')
+
     def splitPosNegPairs(self,genes:list[str]):
         '''
         Given a set of genes, this method returns a tuple of two sets. The first set contains all positive gene pairs (pairs of genes that are co-annotated to at least one GO term) and the second set contains all negative gene pairs (pairs of genes that are not co-annotated to any GO terms and whose smallest co-annotated term has less than 10% of the yeast genome annotated to it).
         '''
-        posPairs = set()
-        negPairs = set()
+        posPairs = []
+        negPairs = []
 
+        geneSet = set(genes)
+
+        smallestCommonAncestorFile = os.path.dirname(__file__) + '/../data/Pairs_SmallestCommonAncestor.npy'
+        allPairs = np.load(smallestCommonAncestorFile,allow_pickle=True)
         smallestCommonAncestorThreshold = 0.1 * len(self.allGenes) # the maximum number of annotations a pair's smallest common ancestor term can have to be considereed a negative pair
 
         # Iterate through all pairs of genes
-        for i in range(len(genes)):
-            for j in range(i+1,len(genes)):
-                geneA = genes[i]
-                geneB = genes[j]
-
+        for pair in allPairs:
+            
+            geneA = pair[0]
+            geneB = pair[1]
+            smallestCommonAncestor = pair[2]
+            if geneA in geneSet and geneB in geneSet:
                 if self.coannotated(geneA,geneB):
-                    posPairs.add((geneA,geneB))
-                elif self.parser.smallestCommonAncestor(geneA,geneB) < smallestCommonAncestorThreshold:
-                    negPairs.add((geneA,geneB))
+                    posPairs.append((geneA,geneB))
+                elif smallestCommonAncestor < smallestCommonAncestorThreshold:
+                    negPairs.append((geneA,geneB))
 
-        return posPairs,negPairs
+        return np.array(posPairs,dtype='U10'), np.array(negPairs,dtype='U10')
 
     def coannotated(self,geneA:str,geneB:str) -> bool:
         '''
@@ -235,8 +241,8 @@ class PredictionModel():
         '''
         Creates a mini-batch of gene pairs containing an equal number of positive and negative pairs
         '''
-        posBatch = np.random.choice(posPairs,size=math.ceil(batchSize/2),replace=False)
-        negBatch = np.random.choice(negPairs,size=math.floor(batchSize/2),replace=False)
+        posBatch = posPairs[np.random.choice(len(posPairs),size=math.ceil(batchSize/2),replace=False)]
+        negBatch = negPairs[np.random.choice(len(negPairs),size=math.floor(batchSize/2),replace=False)]
 
         return np.concatenate((posBatch,negBatch),axis=0)
     
@@ -244,10 +250,10 @@ class PredictionModel():
         '''
         Given a batch of gene pairs, this method return a 2D vector where each row is the feature vector for a gene pair
         '''
-        features = []
-        for pair in batch:
+        features = np.zeros(shape=(len(batch),self.expressionData.numDatasets),dtype=np.float32)
+        for i, pair in enumerate(batch):
             geneA, geneB = pair
-            features.append(self.expressionData.similarityVector(geneA,geneB))
+            features[i] = self.expressionData.similarityVector(geneA,geneB)
 
         return torch.tensor(features,dtype=torch.float32)
     

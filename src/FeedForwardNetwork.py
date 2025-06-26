@@ -13,7 +13,7 @@ class FeedForwardNetwork(nn.Module):
 
             -activation - a pyTorch activation function used on each hidden layer of the network
         '''
-        super.__init__()
+        super().__init__()
 
         self.layers = nn.Sequential()
 
@@ -21,7 +21,7 @@ class FeedForwardNetwork(nn.Module):
         self.layers.add_module("Activation Function", activation)
 
         for i in range(len(hiddenLayers) - 1):
-            self.layers.add_module("Hidden Layer" + i, nn.Linear(hiddenLayers[0],hiddenLayers[i+1]))
+            self.layers.add_module("Hidden Layer" + str(i), nn.Linear(hiddenLayers[i],hiddenLayers[i+1]))
             self.layers.add_module("Activation Function", activation)
         
         self.layers.add_module("Output Layer", nn.Linear(hiddenLayers[-1],outputSize))

@@ -27,6 +27,14 @@ class GOParser():
         # Create onotology and slim ontology objects
         self.ontology = Ontology(ontologyFile,annotationsFile,loadLocal=True)
         self.slim = Ontology(slimFile,annotationsFile,loadLocal=True)
+
+        # Assign YORFS to Gene objects in self.ontology
+        self.assignYORF()
+
+        # Assign children to each term in the ontology, and collect set of each gene's annotated terms
+        self.assignChildren()
+        for id, gene in self.ontology.genes.items():
+            gene.annotateTerms()
         
 
     def getGenes(self,term:str) -> set[str]:
@@ -94,8 +102,8 @@ class GOParser():
         '''
 
         # Get each gene's annotated terms, the take their intersection to get the set of co-annotated terms
-        A_terms = self.onto.yorfs[geneA].allTerms
-        B_terms = self.onto.yorfs[geneB].allTerms
+        A_terms = self.ontology.yorfs[geneA].allTerms
+        B_terms = self.ontology.yorfs[geneB].allTerms
         coannotations = A_terms & B_terms
         
         # mapping of shared GO terms to number of annotations to that GO term
@@ -107,6 +115,23 @@ class GOParser():
         This method returns a list of all genes contained within the parser's ontology
         '''
         return self.ontology.yorfs.keys()
+    
+    def assignChildren(self):
+        '''
+        This method assigns the children of each term in the ontology
+        '''
+        for id, term in self.ontology.terms.items():
+            for parent in term.parents():
+                parent.children.add(term)
+            
+    def assignYORF(self):
+        '''
+        This method assigns all YORFs in the ontology to the ontology's yorfs dictionary, which is a dictionary mapping YORF names to Gene objects.''
+        '''
+        for id, gene in self.ontology.genes.items():
+            for alias in gene.aliases:
+                if GOParser.isYORF(alias):
+                    self.ontology.yorfs[alias] = gene
 
 
 

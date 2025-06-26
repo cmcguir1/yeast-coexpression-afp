@@ -22,12 +22,22 @@ class GeneExpressionData():
         '''
         self.packageDir = os.path.dirname(__file__) + '/..'
 
-        self.genes = list(genes)
-        sorted(self.genes)
-        self.geneIndex = {gene:i for i,gene in enumerate(genes)}
+        # If I get the time, I would like to implement this in a different way
+
+        # self.genes = list(genes)
+        # sorted(self.genes)
+        # self.geneIndex = {gene:i for i,gene in enumerate(genes)}
+
+        geneIndices = pd.read_csv(f'{self.packageDir}/data/AllYeastGenes.csv').to_numpy()
+        self.genes = [gene[0] for gene in geneIndices]
+        self.geneIndex = {gene[0]: gene[1] for gene in geneIndices}
 
         n = len(self.genes)
-        self.pairsLen = ((n*(n-1)) // 2)+ n
+
+        # It seems like my original implementation did not use self pairs
+        # self.pairsLen = ((n*(n-1)) // 2)
+        # I'm not sure why the original implementation adds 2 n instead of 1 n, but for now, I just need to make sure the program is running
+        self.pairsLen = ((n*(n-1)) // 2) + 2 *n
 
 
         # Locate datasets files
@@ -152,7 +162,7 @@ class GeneExpressionData():
         r = max(a,b)
         c = min(a,b)
 
-        index = (c + (r * len(self.genes))) - ((r*(r+1)) // 2)
+        index = (c + (r * len(self.genes))) - ((r*(r-1)) // 2)
         
         return index
     
