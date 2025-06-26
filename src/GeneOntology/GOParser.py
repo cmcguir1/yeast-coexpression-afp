@@ -90,18 +90,23 @@ class GOParser():
 
     def smallestCommonAncestor(self,geneA:str,geneB:str) -> int:
         '''
-        This method returns the number of annotations of the smallests GO term for which geneA and geneB are both annotated to. This method is used in the prediction model to remove gene pairs that share a a similar broad function, but are not labled as positive.
+        This method returns the number of annotations of the smallest GO term for which geneA and geneB are co-annotated to. This method is used in the PredictionModel to remove gene pairs that share a a similar broad function, but are not labled as positive.
         '''
+
+        # Get each gene's annotated terms, the take their intersection to get the set of co-annotated terms
         A_terms = self.onto.yorfs[geneA].allTerms
         B_terms = self.onto.yorfs[geneB].allTerms
-
-        shared = A_terms & B_terms
+        coannotations = A_terms & B_terms
         
         # mapping of shared GO terms to number of annotations to that GO term
-        shared_geneNums = list(map(lambda term: len(term.allAnnos()),shared))
+        shared_geneNums = list(map(lambda term: len(term.allAnnos()),coannotations))
         return min(shared_geneNums)
-
-
+    
+    def allGenes(self) -> set[str]:
+        '''
+        This method returns a list of all genes contained within the parser's ontology
+        '''
+        return self.ontology.yorfs.keys()
 
 
 

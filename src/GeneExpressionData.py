@@ -1,7 +1,5 @@
 import numpy as np
-import scipy as sp
 import pandas as pd
-import torch
 import os
 
 class GeneExpressionData():
@@ -18,7 +16,7 @@ class GeneExpressionData():
             -datasetMode - string that specifies how the object will decide which datasets are included in the final gene expression compendium. Options are:
                 -'all' - include all datasets included in the Yeast_NN_GFP/data/GeneExpression/Datasets/ directory
                 -'file' - include only datasets specified in the datasetsFile argument
-                -'2007' | 'Comparison' - include only that gene expression datasets used by MEFIT, SPELL, and bioPIXIE in Hess et al. 2009 (https://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1000407#s5)
+                -'2007' or 'Comparison' - include only that gene expression datasets used by MEFIT, SPELL, and bioPIXIE in Hess et al. 2009 (https://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1000407#s5)
             -datasetsFile - text file with a list of dataset file names that should be included in the gene expression compendium. Each file name should be on a different line, and all file should be located in the Yeast_NN_GFP/data/GeneExpression/Datasets/ directory
             
         '''
@@ -30,6 +28,7 @@ class GeneExpressionData():
 
         n = len(self.genes)
         self.pairsLen = ((n*(n-1)) // 2)+ n
+
 
         # Locate datasets files
         if datasetMode in ['all','All']:
@@ -51,6 +50,8 @@ class GeneExpressionData():
         for file in files:
             if not os.path.exists(f'{self.packageDir}/data/GeneExpression/CorrelationDictionaries/{file}_corrDict.npy'):
                 self.createCorrelationDictionary(file)
+
+        self.numDatasets = len(files)
         
         # Assemble each dataset's correlation dictionary into a 2D array
         self.correlationDictionary = np.zeros((self.pairsLen,len(files)),dtype=np.float16)
@@ -65,6 +66,7 @@ class GeneExpressionData():
         Arguments:
             -file - name of the dataset file to create the correlation dictionary for
         '''
+        print(f'Creating correlation dictionary for {file}...')
 
         # Read in expression data from file, then filter unnecessary columns and rows
         data = pd.read_csv(f'{self.packageDir}/data/GeneExpression/Datasets/{file}',sep='\t')
@@ -83,6 +85,7 @@ class GeneExpressionData():
 
         # Calculate Pearson correlation for all pairs of genes
         for i in range(len(self.genes)):
+            print(i)
             for j in range(i,len(self.genes)):
                 geneA = self.genes[i]
                 geneB = self.genes[j]
@@ -155,9 +158,17 @@ class GeneExpressionData():
     
     def similarityVector(self,geneA:str,geneB:str) -> np.ndarray:
         '''
-        Returns the Pearson correlation vector between two genes in all datasets.
+        Returns the z-score vector between two genes in all datasets.
         '''
         return self.correlationDictionary[self.genePairIndex(geneA,geneB)]
+    
+    def countExperimentalConditions(self,file:str) -> int:
+        '''
+        Returns the number of experimental conditions in a dataset file.
+        '''
+        data = pd.read_csv(f'{self.packageDir}/data/GeneExpression/Datasets/{file}',sep='\t')
+        data.drop(columns=['NAME','GWEIGHT'],axis=1,inplace=True)
+        return len(data.columns) - 1
 
         
         

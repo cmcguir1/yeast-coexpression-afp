@@ -1,8 +1,12 @@
 import pandas as pd
 import numpy as np
 import os
+import torch
+import math
 
 from GeneOntology.GOParser import GOParser
+from GeneExpressionData import GeneExpressionData
+from FeedForwardNetwork import FeedForwardNetwork
 
 class PredictionModel():
     '''
@@ -10,20 +14,18 @@ class PredictionModel():
     '''
 
     def __init__(self,
-                 modelName:str,folder='.',ontologyDate:str = '2022-06-15',numFolds:int=4,
+                 modelName:str,folder='.',ontologyDate:str = '2007-01-01',numFolds:int=4,
                  inputData:str='x',outputTerms:str='b',addtionalOutputs:list[str]=[],
-                 hiddenStructure:str='500x200x100',activationFunc:str='ReLU',lossFunc:str='BCE',
-                 lr:float=0.01,batchSize:int=50,momentum:float=0.9,
-                 weightDecay:float=0.0,inputDropout:float=None,hiddenDropout:float=None,
-                 goldStandardFile:str=None
+                 hiddenStructure:list[int]=[500,200,100],activationFunc:str='ReLU',lossFunc:str='BCE',
+                 goldStandardFile:str=None,datasetMode:str='2007',datasetsFile:str=None
                  ):
         '''
         Initialize the PredictionModel object.
 
         Arguments:
-            -modelName - name of prediction model. A folder with this name will be create to store  all data related to this model
-            -folder - the folder your model will be save. By default, model is saved to your     current working directory
-            -ontoDate - date Gene Ontology annotations and DAG will be pulled from. Default is 2022.
+            -modelName - name of prediction model. A folder with this name will be create to store all data related to this model
+            -folder - the folder your model will be save. By default, model is saved to your current working directory
+            -ontologyDate - date Gene Ontology annotations and DAG will be pulled from. Default is 2007.
             -numFolds - number of folds used for k-fold cross validation.
 
             -inputData - string of single letter flags specifiying what kinds of data model will use as features. Each flag is specified below:
@@ -41,31 +43,32 @@ class PredictionModel():
             -activationFunc - the activation function to used in each hidden layer of the neural networks
             -lossFunc - loss function used to train neural network. By default, the model uses a binary cross entropy with logits loss function.
 
-            lr - learning rate hyperparameter
-            batchSize - mini-batch size hyperparameter
-            momentum - momentum hyperparameter
-            weightDecay - scalar hyperparameter for L2 weight regularization
+            
+            -goldStandardFile - file path to csv file containing custom k-fold split of yeast genes. If None, a deafult k-fold split name GoldStandardGenes.csv will be created in the model folder
+            -datasetMode - string passed to GeneExpressionData object that specifies how the model will decide which datasets are included in the
+            -datasetsFile - if datasetMode is 'file', this arguument species the file path to the text file containing the list of gene epxression datasets to use for input features
 
-            inputDropout - dropout rate for input layer
-            hiddenDropout - dropout rate for hidden layers
 
         '''
 
         # Check if model folder already exists
-        if not os.path.exists(f'{folder}/{modelName}'):
-            os.mkdir(f'{folder}/{modelName}')
+        self.modelFolder = f'{folder}/{modelName}'
+        if not os.path.exists(self.modelFolder):
+            os.mkdir(self.modelFolder)
 
         # Initalize model parameters to fields
         self.numFolds = numFolds
 
-        
+        # Create Gene Ontology parser and get GO slim terms
         self.parser = GOParser(ontologyDate)
         self.terms = self.parser.getSlimLeaves(roots=outputTerms)
 
 
-        # Intialization of gold standard and gene folds
+        # Intialization of set of all genes, gold standard, and gene folds
+        self.allGenes = self.parser.allGenes()
+
         self.goldStandard = set()
-        for id, genes in self.terms: 
+        for _, genes in self.terms: 
             self.goldStandard = self.goldStandard.union(genes)
 
         if goldStandardFile is not None:
@@ -77,9 +80,83 @@ class PredictionModel():
         else:
             self.geneFolds = self.createNewGeneFolds(gsFile)
 
-        # Initialize model input data
+        print(self.geneFolds)
 
+        # Initialize model input data
+        self.expressionData = GeneExpressionData(genes=self.allGenes,datasetMode=datasetMode,datasetsFile=datasetsFile)
+
+        # Initalize model neural networks
+        self.networks = []
+        for i in range(numFolds):
+            network = FeedForwardNetwork(inputSize=self.expressionData.numDatasets,
+                                                    outputSize=len(self.terms),
+                                                    hiddenLayers=hiddenStructure,activation=activationFunc)
+            # If network has been previously trained, load in weights
+            if(os.path.exists(f'{self.modelFolder}/Network_fold{i}.pth')):
+                network.load_state_dict(torch.load(f'{self.modelFolder}/Network_fold{i}.pth'))
+            self.networks.append(network)
+    
+    def trainFold(self,fold:int,numBatches:int=600000,batchSize=50,lr=0.01,momentum=0.9):
+        '''
+        Trains a single fold of the model's neural network
         
+        Arguments:
+            -fold - the fold number to train
+            -numBatches - the number of mini-batches to use for training
+            -batchSize - the number of gene pairs in each mini-batch
+            -lr - learning rate for stochastic gradient descent optimizer
+            -momentum - momentum for stochastic gradient descent optimizer
+        '''
+        # Initialize neural network, loss function, and optimizier
+        network = self.networks[fold]
+        network.train()
+        
+        lossFunction = torch.nn.BCEWithLogitsLoss()
+        optimizer = torch.optim.SGD(network.parameters(),lr=lr,momentum=momentum)
+
+        trainGenes, testGenes = self.getDataSplit(fold)
+
+        trainPosPairs, trainNegPairs = self.splitPosNegPairs(list(trainGenes))
+        testPosPairs, testNegPairs = self.splitPosNegPairs(list(testGenes))
+
+        lossTable = []
+        runningLoss = 0.0
+
+        for i in range(numBatches):
+            batch =self.createBatch(trainPosPairs,trainNegPairs,batchSize)
+            features = self.featuresVector(batch)
+            labels = self.labelsVector(batch)
+
+            optimizer.zero_grad()
+            outputs = network(features)
+
+            loss = lossFunction(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            runningLoss += loss.item()
+
+            if i % 1000 == 0:
+                with torch.no_grad():
+                    testBatch =self.createBatch(testPosPairs,testNegPairs,batchSize*100)
+                    testFeatures = self.featuresVector(testBatch)
+                    testLabels = self.labelsVector(testBatch)
+
+                    testOutputs = network(testFeatures)
+                    testLoss = lossFunction(testOutputs,testLabels)
+
+                    if(i == 0):
+                        runningLoss *= 1000
+                    lossTable.append((i,runningLoss,testLoss.item()))
+                    runningLoss = 0.0
+        
+        torch.save(network.state_dict(),f'{self.modelFolder}/Network_fold{fold}.pth')
+        pd.DataFrame(lossTable,columns=['Batch','Train Loss','Test Loss']).to_csv(f'{self.modelFolder}/Loss_fold{fold}.csv',index=False)
+
+
+    #----------------------------------------------------------------------------------#
+    #------------------------------- Helper Functions ---------------------------------#   
+    #----------------------------------------------------------------------------------#
 
     def loadGeneFoldsFromFile(self,fileName:str) -> list[set[str]]:
         ''' Loads k-folds gene splits from a csv file '''
@@ -109,7 +186,87 @@ class PredictionModel():
         # Load the gene folds from the file that was just created
         return self.loadGeneFoldsFromFile(fileName)
     
+    def getDataSplit(self,fold:int) -> tuple[set[str],set[str]]:
+        '''
+        Returns the tuple of the training and testing gene sets (in that order) for a given fold
+        '''
+        testGenes = set()
+        trainGenes = set()
+        for i in range(self.numFolds):
+            if i == fold:
+                testGenes = self.geneFolds[i]
+            else:
+                trainGenes = trainGenes.union(self.geneFolds[i])
+
+        return trainGenes,testGenes
     
+    def splitPosNegPairs(self,genes:list[str]):
+        '''
+        Given a set of genes, this method returns a tuple of two sets. The first set contains all positive gene pairs (pairs of genes that are co-annotated to at least one GO term) and the second set contains all negative gene pairs (pairs of genes that are not co-annotated to any GO terms and whose smallest co-annotated term has less than 10% of the yeast genome annotated to it).
+        '''
+        posPairs = set()
+        negPairs = set()
+
+        smallestCommonAncestorThreshold = 0.1 * len(self.allGenes) # the maximum number of annotations a pair's smallest common ancestor term can have to be considereed a negative pair
+
+        # Iterate through all pairs of genes
+        for i in range(len(genes)):
+            for j in range(i+1,len(genes)):
+                geneA = genes[i]
+                geneB = genes[j]
+
+                if self.coannotated(geneA,geneB):
+                    posPairs.add((geneA,geneB))
+                elif self.parser.smallestCommonAncestor(geneA,geneB) < smallestCommonAncestorThreshold:
+                    negPairs.add((geneA,geneB))
+
+        return posPairs,negPairs
+
+    def coannotated(self,geneA:str,geneB:str) -> bool:
+        '''
+        Predicate that returns true if geneA and geneB are co-annotated to at least one GO term in the model's slim
+        '''
+        for _, termGenes in self.terms:
+            if geneA in termGenes and geneB in termGenes:
+                return True
+        return False
+    
+    def createBatch(self,posPairs,negPairs,batchSize:int):
+        '''
+        Creates a mini-batch of gene pairs containing an equal number of positive and negative pairs
+        '''
+        posBatch = np.random.choice(posPairs,size=math.ceil(batchSize/2),replace=False)
+        negBatch = np.random.choice(negPairs,size=math.floor(batchSize/2),replace=False)
+
+        return np.concatenate((posBatch,negBatch),axis=0)
+    
+    def featuresVector(self,batch:np.ndarray) -> torch.Tensor:
+        '''
+        Given a batch of gene pairs, this method return a 2D vector where each row is the feature vector for a gene pair
+        '''
+        features = []
+        for pair in batch:
+            geneA, geneB = pair
+            features.append(self.expressionData.similarityVector(geneA,geneB))
+
+        return torch.tensor(features,dtype=torch.float32)
+    
+    def labelsVector(self,batch:np.ndarray) -> torch.Tensor:
+        '''
+        Given a batch of gene pairs, this method returns a 2D vector where each row is the label vector for a gene pair
+        '''
+        labels = []
+        for pair in batch:
+            geneA, geneB = pair
+            label = []
+            for _, termGenes in self.terms:
+                if geneA in termGenes and geneB in termGenes:
+                    label.append(1)
+                else:
+                    label.append(0)
+            labels.append(label)
+        return torch.tensor(labels,dtype=torch.float32)
+
     # ---------------------------------------------------------------------------------- #
     # ----------------------------------- Unit Tests ----------------------------------- #
     # ---------------------------------------------------------------------------------- #
