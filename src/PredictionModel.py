@@ -250,12 +250,17 @@ class PredictionModel():
         '''
         Given a batch of gene pairs, this method return a 2D vector where each row is the feature vector for a gene pair
         '''
-        features = np.zeros(shape=(len(batch),self.expressionData.numDatasets),dtype=np.float32)
-        for i, pair in enumerate(batch):
-            geneA, geneB = pair
-            features[i] = self.expressionData.similarityVector(geneA,geneB)
+               
+        indices = torch.IntTensor([self.expressionData.genePairIndex(pair[0],pair[1]) for pair in batch])
 
-        return torch.tensor(features,dtype=torch.float32)
+        features = self.expressionData.correlationDictionary.index_select(0,indices).float()
+
+        # features = np.zeros(shape=(len(batch),self.expressionData.numDatasets),dtype=np.float32)
+        # for i, pair in enumerate(batch):
+        #     geneA, geneB = pair
+        #     features[i] = self.expressionData.similarityVector(geneA,geneB)
+
+        return features
     
     def labelsVector(self,batch:np.ndarray) -> torch.Tensor:
         '''

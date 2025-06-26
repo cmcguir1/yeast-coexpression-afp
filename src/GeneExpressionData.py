@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import os
+import torch
 
 class GeneExpressionData():
     '''
@@ -67,6 +68,8 @@ class GeneExpressionData():
         self.correlationDictionary = np.zeros((self.pairsLen,len(files)),dtype=np.float16)
         for i,file in enumerate(files):
             self.correlationDictionary[:,i] = np.load(f'{self.packageDir}/data/GeneExpression/CorrelationDictionaries/{file}_corrDict.npy')
+
+        self.correlationDictionary = torch.from_numpy(self.correlationDictionary.astype(np.float16)) 
 
 
     def createCorrelationDictionary(self,file:str) -> None:
@@ -166,11 +169,13 @@ class GeneExpressionData():
         
         return index
     
-    def similarityVector(self,geneA:str,geneB:str) -> np.ndarray:
+    def similarityVector(self,geneA:str,geneB:str) -> torch.Tensor:
         '''
         Returns the z-score vector between two genes in all datasets.
         '''
         return self.correlationDictionary[self.genePairIndex(geneA,geneB)]
+    
+    
     
     def countExperimentalConditions(self,file:str) -> int:
         '''
