@@ -5,7 +5,7 @@ import time
 def main():
     start = time.time()
     model = PredictionModel(folder='Dev',modelName='TestModel',numFolds=4,datasetMode='2007')
-    model.trainFold(3,numBatches=5000)
+    model.evaluateFoldPerformance(0)
     print(f'Training took {(time.time() - start)/60} minutes')
 
 if __name__ == "__main__":
