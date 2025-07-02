@@ -3,7 +3,7 @@ import numpy as np
 import os
 import torch
 import math
-import time
+
 
 from GeneOntology.GOParser import GOParser
 from GeneExpressionData import GeneExpressionData
@@ -70,7 +70,10 @@ class PredictionModel():
 
 
         # Intialization of set of all genes, gold standard, and gene folds
-        self.allGenes = self.parser.allGenes()
+        packageDir = os.path.dirname(__file__) + '/..'
+        geneIndices = pd.read_csv(f'{packageDir}/data/AllYeastGenes.csv').to_numpy()
+        self.allGenes = set([gene[0] for gene in geneIndices])
+        # self.allGenes = self.parser.allGenes()
 
         self.goldStandard = set()
         for _, genes in self.terms: 
@@ -84,6 +87,8 @@ class PredictionModel():
             self.geneFolds = self.loadGeneFoldsFromFile(gsFile)
         else:
             self.geneFolds = self.createNewGeneFolds(gsFile)
+
+        self.agnosticGenes = self.allGenes - self.goldStandard
 
         # Initialize model input data
         self.expressionData = GeneExpressionData(genes=self.allGenes,datasetMode=datasetMode,datasetsFile=datasetsFile)
@@ -135,6 +140,7 @@ class PredictionModel():
             batch =self.createBatch(i,trainPosPairs,trainNegPairs,batchSize)
             features = self.featuresVector(batch)
             labels = self.labelsVector(batch)
+
             features = features.to(device)
             labels = labels.to(device)
             
@@ -151,6 +157,7 @@ class PredictionModel():
 
             # Every 1000 batches, evaluate the model on the test set and save the loss
             if i % 1000 == 0:
+                
                 with torch.no_grad():
                     testBatch =self.createBatch(i//1000,testPosPairs,testNegPairs,batchSize*100)
                     testFeatures = self.featuresVector(testBatch)
@@ -170,58 +177,236 @@ class PredictionModel():
 
     def evaluateFoldPerformance(self,fold:int):
         '''
-        Evaluates the pairwise performance of a fold's neural network on the test set.
+        Evaluates the pairwise performance of a fold's neural network on the testing and training gene sets for each GO term.
+        Arguments:
+            -fold - the fold number to evaluate
         '''
+
+        # Helper functions
+        def validPair(geneA,geneB,geneSet) -> bool:
+            'Predicate that returns true if the genes of a pair are different and both in the gene set'
+            return geneA != geneB and geneA in geneSet and geneB in geneSet
+
+        def evaluateTermPerformance(termIndex,posGenes,geneSet,negPairs) -> pd.DataFrame:
+            '''
+            Helper function that evaluates a GO term's performance on a set of genes (the testing genes or training genes)
+            '''
+
+            # if a term has less than 5 positive genes in the gene set, the performance evaluation will be uninformative, so return None
+            if len(posGenes.intersection(geneSet)) < 5:
+                return None
+            
+            # Intialize list of all pairs of genes (in the gene set) that are co-annotated to the term, and take a random sample of at most 10,000 pairs
+            posPairs = np.array([[geneA, geneB] for geneA in posGenes for geneB in geneSet if validPair(geneA, geneB, geneSet)],dtype='U10')
+            np.random.shuffle(posPairs)
+            posPairs = posPairs[:min(10000,len(posPairs))]
+
+            # Take a random sample of negative pairs that is at most 10 times the size of the positive pairs
+            np.random.shuffle(negPairs)
+            negPairs = negPairs[:min(10*len(posPairs),len(negPairs))]
+
+            # Compute confidence values for each pair of genes
+            termPairs = np.concatenate((posPairs,negPairs),axis=0)
+            features = self.featuresVector(termPairs)
+            features = features.to(device)
+            outputs = network(features)
+            confidenceValues = outputs[:,termIndex].cpu().numpy().flatten()
+
+            # Create labels for the pairs of genes, where 1 is a positive pair and -1 is a negative pair
+            labels = np.concatenate((np.ones(len(posPairs)),-1*np.ones(len(negPairs))),axis=0)
+
+            # Stack gene pairs, confidence values, and labels, then perform a threshold sweep
+            temp = np.stack([confidenceValues,labels],axis=1)
+            labeledRanking =  np.concatenate([termPairs,temp],axis=1,dtype=object)
+            labeledRanking = pd.DataFrame(labeledRanking,columns=['Gene A','Gene B','Confidence Value','Label'])
+            termRanking = PredictionModel.thresholdSweep(labeledRanking)
+
+            return termRanking
+
+        # main logic
+
+        # Check if model already has folders for pairwise performance testing and training results
+        if not os.path.exists(f'{self.modelFolder}/Pairwise/Testing'):
+            os.mkdir(f'{self.modelFolder}/Pairwise/Testing')
+        if not os.path.exists(f'{self.modelFolder}/Pairwise/Training'):
+            os.mkdir(f'{self.modelFolder}/Pairwise/Training')
 
         with torch.no_grad():
 
+            # Load fold's neural network
             network = self.networks[fold]
             device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
             network.to(device)
 
-            # Get testing gene split for fold, then it sets of positive and negative gene pairs (only the negative pair will  be used)
-            _, testGenes = self.getDataSplit(fold)
-            _, testNegPairs = self.splitPosNegPairs(testGenes)
+            # Get fold's testing and training gene split, then create the sets of positive and negative gene pairs (only the negative pair will be used)
+            trainGenes, testGenes = self.getDataSplit(fold)
+            _ , testNegPairs = self.splitPosNegPairs(testGenes)
+            _ , trainNegPairs = self.splitPosNegPairs(trainGenes)
 
-            performance = []
-
-            
+            performance = [] # List to store the performance metrics for each term
 
             for i, (term, posGenes) in enumerate(self.terms):
-                print(term)
-                posPairs = np.array([[geneA, geneB] for geneA in posGenes for geneB in posGenes if geneA != geneB],dtype='U10')
-                np.random.shuffle(posPairs)
-                posPairs = posPairs[:min(10000,len(posPairs))]
-                np.random.shuffle(testNegPairs)
-                negPairs = testNegPairs[:min(10*len(posPairs),len(testNegPairs))]
 
-                termPairs = np.concatenate((posPairs,negPairs),axis=0)
+                # Evaluate the performance of the fold on its test set and save the results to a csv file
+                testRanking = evaluateTermPerformance(i,posGenes,testGenes,testNegPairs)
+                if testRanking is not None:
+                    testRanking.to_csv(f'{self.modelFolder}/Pairwise/Testing/{term.replace(":","-")}_Fold{fold}.csv',index=False)
+                    testAvgPrecision, testAUC = PredictionModel.AveragePrecisionAndAUC(testRanking)   
+                else:
+                    testAvgPrecision, testAUC = None, None
+                
+                # Evaluate the performance of the fold on its training set and save the results to a csv file
+                trainRanking = evaluateTermPerformance(i,posGenes,trainGenes,trainNegPairs)
+                if trainRanking is not None:
+                    trainRanking.to_csv(f'{self.modelFolder}/Pairwise/Training/{term.replace(":","-")}_Fold{fold}.csv',index=False)
+                    trainAvgPrecision, trainAUC = PredictionModel.AveragePrecisionAndAUC(trainRanking)
+                else:
+                    trainAvgPrecision, trainAUC = None, None
 
-                features = self.featuresVector(termPairs)
-                features = features.to(device)
+                # Append the performance metrics to the list
+                performance.append((term,testAvgPrecision,trainAvgPrecision,testAUC,trainAUC))
+
+            # Save the performance metrics to a csv file
+            pd.DataFrame(performance,columns=['Term','Test Average Precision','Train Average Precision','Test AUC','Train AUC']).to_csv(f'{self.modelFolder}/Pairwise/PerformanceSummary_Fold{fold}.csv',index=False)
+
+    def constructFunctionalRelationshipGraph(self):
+        '''
+        
+        '''
+        # n = len(self.allGenes)
+        # pairsLength = (n*(n-1)) // 2
+        pairsLength = self.expressionData.pairsLen # I need to figure out what going on here
+        
+        confidenceValues = torch.zeros((pairsLength,len(self.terms)),dtype=torch.float32)
+
+        print(confidenceValues.element_size() * confidenceValues.nelement() / 1_000_000, 'MB of memory used for confidence values')
+
+        device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
+        index = 0
+
+        with torch.no_grad():
+            # Feed forward gene pairs from single networks
+            print('Single networks')
+            for fold in range(self.numFolds):
+                network = self.networks[fold].to(device)
+                network.eval()
+    
+
+                genes = self.geneFolds[fold]
+                pairs = np.array([[geneA,geneB] for geneA in genes for geneB in genes if geneA < geneB],dtype='U10')
+                print(len(pairs), 'pairs from fold', fold)
+                features = self.featuresVector(pairs).to(device)
+
                 outputs = network(features)
+                print(outputs.element_size() * outputs.nelement() / 1_000_000, 'MB of memory used for outputs')
+                indices = [self.expressionData.genePairIndex(pair[0],pair[1]) for pair in pairs]
+                confidenceValues[indices] = outputs.cpu()
 
-                confidenceValues = outputs[:,i].cpu().numpy().flatten()
-                labels = np.concatenate((np.ones(len(posPairs)),-1*np.ones(len(negPairs))),axis=0)
+            # Fee forward gene pairs from two networks
+            print('Two networks')
+            for foldA in range(self.numFolds):
+                for foldB in range(foldA+1,self.numFolds):
+                    networkA = self.networks[foldA].to(device)
+                    networkB = self.networks[foldB].to(device)
 
-                temp = np.stack([confidenceValues,labels],axis=1)
-                termRanking = np.concatenate([termPairs,temp],axis=1,dtype=object)
+                    genesA = self.geneFolds[foldA]
+                    genesB = self.geneFolds[foldB]
+                    pairs = np.array([[geneA,geneB] for geneA in genesA for geneB in genesB if geneA != geneB],dtype='U10')
+                    print(len(pairs), 'pairs from fold', foldA, 'and fold', foldB)
+                    indices = [self.expressionData.genePairIndex(pair[0],pair[1]) for pair in pairs]
+                    features = self.featuresVector(pairs).to(device)
 
-                termRanking = PredictionModel.thresholdSweep(termRanking)
-                termRanking.to_csv(f'{self.modelFolder}/Pairwise/{term.replace(":","-")}_Fold{fold}_.csv',index=False)
+                    outputsA = networkA(features)
+                    outputsB = networkB(features)
+                    print(outputsA.element_size() * outputsA.nelement() / 1_000_000, 'MB of memory used for outputs A')
+                    print(outputsB.element_size() * outputsB.nelement() / 1_000_000, 'MB of memory used for outputs B')
 
-                avgPrecision, auc = PredictionModel.AveragePrecisionAndAUC(termRanking)
+                    outputsAverage = (outputsA + outputsB) / 2.0
+                    confidenceValues[indices] = outputsAverage.cpu()
 
-                performance.append((term,avgPrecision,auc))
+            # Feed forward gene pairs whose confidence values are averaged across all networks
+            print('Averaging networks')
+            agnostic_agnostic_pairs = np.array([[geneA,geneB] for geneA in self.agnosticGenes for geneB in self.agnosticGenes if geneA < geneB],dtype='U10')
+            agnostic_goldStandard_pairs = np.array([[geneA,geneB] for geneA in self.goldStandard for geneB in self.agnosticGenes if geneA != geneB],dtype='U10')
+            agnosticPairs = np.concatenate((agnostic_agnostic_pairs,agnostic_goldStandard_pairs),axis=0) 
+
+            print(len(agnosticPairs), 'agnostic pairs')
+            agnosticIndices = [self.expressionData.genePairIndex(pair[0],pair[1]) for pair in agnosticPairs]
+            # agnosticFeatures = self.featuresVector(agnosticPairs).to(device)
+
+            for i in range(self.numFolds):
+
+                network = self.networks[i].to(device)
+                network.eval()
+
+                for j in range(100):
+                    # outputs = network(agnosticFeatures)
+
+                    start = j * len(agnosticPairs) // 100
+                    end = (j + 1) * len(agnosticPairs) // 100 if j < 99 else len(agnosticPairs)
+                    agnosticFeatures = self.featuresVector(agnosticPairs[start:end]).to(device)
+                    outputs = network(agnosticFeatures)
+                    print(outputs.element_size() * outputs.nelement() / 1_000_000, 'MB of memory used for outputs')
+                    confidenceValues[agnosticIndices[start:end]] += outputs.cpu()
+
+                    confidenceValues[agnosticIndices[start:end]] /= self.numFolds
+
+            torch.save(confidenceValues,f'{self.modelFolder}/FunctionalRelationshipGraph.pth')
+
+    def singleGeneRankings(self):
+        if not os.path.exists(f'{self.modelFolder}/SingleGeneRankings'):
+            os.mkdir(f'{self.modelFolder}/SingleGeneRankings')
+
+        functionalRelationshipGraph = torch.load(f'{self.modelFolder}/FunctionalRelationshipGraph.pth')
+
+        summary = []
+        for i, (term, termGenes) in enumerate(self.terms):
+            scoreDict = {gene: 0 for gene in self.allGenes}
+
+            pairs = np.array([[geneA,geneB] for geneA in self.allGenes for geneB in termGenes if (geneA not in termGenes or geneA < geneB)],dtype='U10')
+            indices = [self.expressionData.genePairIndex(pair[0],pair[1]) for pair in pairs]
+            confidenceValues = functionalRelationshipGraph[indices,i]
+
+            for j in range(len(pairs)):
+                if pairs[j][0] in termGenes:
+                    scoreDict[pairs[j][1]] += confidenceValues[j]
+                if pairs[j][1] in termGenes:
+                    scoreDict[pairs[j][0]] += confidenceValues[j]
+
+            scores = []
+            for gene, score in scoreDict.items():
+                label = None
+                if gene in termGenes:
+                    label = 1
+                elif gene in self.goldStandard:
+                    label = -1
+                else:
+                    label = 0
+                scores.append([gene,score.item(),label])
+            scores = pd.DataFrame(scores, columns=['Gene','Confidence Value','Label']) # Sort by score in descending order
             
-            pd.DataFrame(performance,columns=['Term','Average Precision','AUC']).to_csv(f'{self.modelFolder}/Pairwise/PerformanceSummary_Fold{fold}.csv',index=False)
 
+            ranking = PredictionModel.thresholdSweep(scores)
+
+            # Save the ranking
+            ranking.to_csv(f'{self.modelFolder}/SingleGeneRankings/{term.replace(":", "-")}_SingleGeneRanking.csv', index=False)
+
+            avgPrecision, auc = PredictionModel.AveragePrecisionAndAUC(ranking)
+            summary.append((term,avgPrecision,auc))
+        # Save the summary of all rankings
+        pd.DataFrame(summary,columns=['Term','Average Precision','AUC']).to_csv(f'{self.modelFolder}/SingleGeneRankings/Summary.csv',index=False)
+
+
+
+
+        
 
     #----------------------------------------------------------------------------------#
     #------------------------------- Helper Functions ---------------------------------#   
     #----------------------------------------------------------------------------------#
 
-    def thresholdSweep(table:np.ndarray) -> pd.DataFrame:
+    def thresholdSweep(table:pd.DataFrame) -> pd.DataFrame:
         '''
         Given a table of gene pairs, confidence values, and labels, this method performs a threshold sweep to generate the total operating characteristic of the predictions
         
@@ -233,15 +418,14 @@ class PredictionModel():
                 3 - Label (1 for positive, 0 for negative)
         '''
 
-
         # Sort the table by confidence values in descending order
-        table = table[table[:,2].argsort()[::-1]]
-        print(table)
+        # table = table[table[:,score].argsort()[::-1]]
+        table.sort_values('Confidence Value',axis=0,ascending=False,inplace=True)
 
         truePositives = 0
         falsePositives = 0
-        trueNegatives = sum(table[:,3] == -1)
-        falseNegatives = sum(table[:,3] == 1)
+        trueNegatives = sum(table['Label'] == -1)
+        falseNegatives = sum(table['Label'] == 1)
 
         def calculateStatistics():
             falsePositiveRate = falsePositives / (falsePositives + trueNegatives)
@@ -252,20 +436,21 @@ class PredictionModel():
 
         confusionMatrixStatistics = np.ndarray((len(table),3),dtype=object)
 
-        for i,row in enumerate(table):
-            if row[3] == 1:
+        for i, row in table.iterrows():
+            if row['Label'] == 1:
                 truePositives += 1
                 falseNegatives -= 1
-            elif row[3] == -1:
+            elif row['Label'] == -1:
                 falsePositives += 1
                 trueNegatives -= 1
 
             confusionMatrixStatistics[i] = calculateStatistics()
 
-        ranking = np.concatenate((table,confusionMatrixStatistics),axis=1)
+        table['False Positive Rate'] = confusionMatrixStatistics[:,0]
+        table['Recall'] = confusionMatrixStatistics[:,1]
+        table['Precision'] = confusionMatrixStatistics[:,2]
         
-        return pd.DataFrame(ranking,columns=['Gene A','Gene B','Confidence Value','Label',
-                                            'False Positive Rate','Recall','Precision'])
+        return table
     
     def AveragePrecisionAndAUC(table:pd.DataFrame) -> float:
         '''
@@ -284,10 +469,13 @@ class PredictionModel():
         recall = table['Recall'].values
         auc = np.mean(recall)
 
+        table.sort_values(by='False Positive Rate',inplace=True,ascending=True)
+
         precision = table['Precision'].values
-        for i in range(len(precision)-1):
-            if precision[i] < precision[i+1]:
-                precision[i+1] = precision[i]
+
+        for i in range(len(precision)-1,0,-1):
+            if precision[i-1] < precision[i]:
+                precision[i-1] = precision[i]
         
         averagePrecision = np.mean(precision)
 
@@ -379,10 +567,13 @@ class PredictionModel():
         '''
         Creates a mini-batch of gene pairs containing an equal number of positive and negative pairs
         '''
-        # posBatch = posPairs[np.random.choice(len(posPairs),size=math.ceil(batchSize/2),replace=False)]
-        # negBatch = negPairs[np.random.choice(len(negPairs),size=math.floor(batchSize/2),replace=False)]
-        posBatch = posPairs[i%len(posPairs):(i+batchSize//2)%len(posPairs)]
-        negBatch = negPairs[i%len(negPairs):(i+batchSize//2)%len(negPairs)]
+        
+        start = i * (batchSize // 2)
+
+        posBatch = np.take(posPairs, range(start,(start + batchSize // 2)),mode='wrap',axis=0)
+        negBatch = np.take(negPairs, range(start,(start + batchSize // 2)),mode='wrap',axis=0)
+
+        # print(f'Batch {i}: {len(posBatch)} positive pairs, {len(negBatch)} negative pairs')
 
         return np.concatenate((posBatch,negBatch),axis=0)
     

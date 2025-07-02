@@ -37,6 +37,7 @@ class GeneExpressionData():
 
         # It seems like my original implementation did not use self pairs
         # self.pairsLen = ((n*(n-1)) // 2)
+
         # I'm not sure why the original implementation adds 2 n instead of 1 n, but for now, I just need to make sure the program is running
         self.pairsLen = ((n*(n-1)) // 2) + 2 *n
 
@@ -69,7 +70,7 @@ class GeneExpressionData():
         for i,file in enumerate(files):
             self.correlationDictionary[:,i] = np.load(f'{self.packageDir}/data/GeneExpression/CorrelationDictionaries/{file}_corrDict.npy')
 
-        self.correlationDictionary = torch.from_numpy(self.correlationDictionary.astype(np.float16)) 
+        self.correlationDictionary = torch.from_numpy(self.correlationDictionary.astype(np.float16))
 
 
     def createCorrelationDictionary(self,file:str) -> None:
@@ -165,7 +166,8 @@ class GeneExpressionData():
         r = max(a,b)
         c = min(a,b)
 
-        index = (c + (r * len(self.genes))) - ((r*(r-1)) // 2)
+        # index = (c + (r * len(self.genes))) - ((r*(r-1)) // 2)
+        index = (r + (c * len(self.genes))) - ((c*(c-1)) // 2)
         
         return index
     
