@@ -430,7 +430,7 @@ class PredictionModel():
         def calculateStatistics():
             falsePositiveRate = falsePositives / (falsePositives + trueNegatives)
             recall = truePositives / (truePositives + falseNegatives)
-            precision = truePositives / (truePositives + falsePositives)
+            precision = 1 if truePositives + falsePositives == 0 else truePositives / (truePositives + falsePositives)
             return np.array([falsePositiveRate,recall,precision])
 
 
