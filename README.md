@@ -22,4 +22,4 @@ conda activate yeast-coexpression-afp
 ```
 
 ## Original Implementation
-The original implementation of the methodolgy found in McGuire and Hibbs 2025 can be found in [yeast-coexpression-afp-original](github.com:cmcguir1/yeast-coexpression-afp-original). The original implementation of these algorithms were very computationally inefficient. This new repository was created to provide computationally efficient implementations of our methodologies and an easy to set up virtual environment to improve the reproducability of our results.
+The original implementation of the methodolgy found in McGuire and Hibbs 2025 can be found in [yeast-coexpression-afp-original](https://github.com:cmcguir1/yeast-coexpression-afp-original). The original implementation of these algorithms were very computationally inefficient. This new repository was created to provide computationally efficient implementations of our methodologies and an easy to set up virtual environment to improve the reproducability of our results.
