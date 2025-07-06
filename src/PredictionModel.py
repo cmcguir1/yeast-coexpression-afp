@@ -103,6 +103,19 @@ class PredictionModel():
             if(os.path.exists(f'{self.modelFolder}/Network_fold{i}.pth')):
                 network.load_state_dict(torch.load(f'{self.modelFolder}/Network_fold{i}.pth'))
             self.networks.append(network)
+
+    def trainNetworks(self,numBatches:int=600000,batchSize:int=50,lr:float=0.01,momentum:float=0.9):
+        '''
+        Trains all folds of the model's neural networks using the trainFold method
+
+        Arguments:
+            -numBatches - the number of mini-batches to use for training
+            -batchSize - the number of gene pairs in each mini-batch
+            -lr - learning rate for stochastic gradient descent optimizer
+            -momentum - momentum for stochastic gradient descent optimizer
+        '''
+        for fold in range(self.numFolds):
+            self.trainFold(fold,numBatches,batchSize,lr,momentum)
     
     def trainFold(self,fold:int,numBatches:int=600000,batchSize=50,lr=0.01,momentum=0.9):
         '''
@@ -174,6 +187,16 @@ class PredictionModel():
         # Save network's weights and the loss table in model's folder
         torch.save(network.state_dict(),f'{self.modelFolder}/Network_fold{fold}.pth')
         pd.DataFrame(lossTable,columns=['Batch','Train Loss','Test Loss']).to_csv(f'{self.modelFolder}/Loss_fold{fold}.csv',index=False)
+
+    def evaluatePairwisePerformance(self):
+        '''
+        Evaluates the pairwise performance of each fold's neural network on the testing and training gene sets for each GO term.
+        This method will create a folder in the model's folder called Pairwise, which will contain subfolders Testing and Training.
+        Each subfolder will contain csv files with the pairwise performance of each term for each fold.
+        '''
+
+        for fold in range(self.numFolds):
+            self.evaluateFoldPerformance(fold)
 
     def evaluateFoldPerformance(self,fold:int):
         '''
@@ -376,6 +399,7 @@ class PredictionModel():
 
             scores = []
             for gene, score in scoreDict.items():
+                print(gene,score)
                 label = None
                 if gene in termGenes:
                     label = 1
@@ -426,6 +450,7 @@ class PredictionModel():
         falsePositives = 0
         trueNegatives = sum(table['Label'] == -1)
         falseNegatives = sum(table['Label'] == 1)
+        print('True Positives:', truePositives, 'False Positives:', falsePositives, 'True Negatives:', trueNegatives, 'False Negatives:', falseNegatives)
 
         def calculateStatistics():
             falsePositiveRate = falsePositives / (falsePositives + trueNegatives)
