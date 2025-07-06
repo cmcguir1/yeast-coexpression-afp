@@ -10,7 +10,7 @@ def main():
     # for i in range(4):
     #     model.evaluateFoldPerformance(i)
     # model.constructFunctionalRelationshipGraph()
-    model.singleGeneRankings()
+    # model.singleGeneRankings()
     print(f'Training took {(time.time() - start)/60} minutes')
 
 if __name__ == "__main__":

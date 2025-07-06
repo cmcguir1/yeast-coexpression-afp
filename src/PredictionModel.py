@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import os
 import torch
-import math
 
 
 from GeneOntology.GOParser import GOParser
