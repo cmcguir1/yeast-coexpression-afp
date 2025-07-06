@@ -1,4 +1,4 @@
-# Yeast_NN_GFP
+# yeast-coexpression-afp
 This repository contains the scripts needed to run the co-expression-bassed automated function prediction model in yeast described in McGuire and Hibbs 2025. The model trains four feedforward neural networks to predict the co-annotations of pairs of genes to 79 Gene Ontology biological process terms from the co-expression profiles of the pair of genes in 113 gene expression datasets. Once these networks are trained, our model can aggregate its pairwise predictions to rank individual genes by their predicted involvement in each of the 79 GO terms.
 
 ## About
