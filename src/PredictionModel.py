@@ -14,7 +14,7 @@ class PredictionModel():
     '''
 
     def __init__(self,
-                 modelName:str,folder='.',ontologyDate:str = '2007-01-01',numFolds:int=4,
+                 modelName:str,folder='.',ontologyDate:str='2007-04-01',numFolds:int=4,
                  inputData:str='x',outputTerms:str='b',addtionalOutputs:list[str]=[],
                  hiddenStructure:list[int]=[500,200,100],activationFunc=torch.nn.ReLU(),
                  goldStandardFile:str=None,datasetMode:str='2007',datasetsFile:str=None
@@ -205,26 +205,32 @@ class PredictionModel():
         '''
 
         # Helper functions
-        def validPair(geneA,geneB,geneSet) -> bool:
-            'Predicate that returns true if the genes of a pair are different and both in the gene set'
-            return geneA != geneB and geneA in geneSet and geneB in geneSet
+        
+        def filterNegativePairs(pairs:np.ndarray,posGenes:set[str]) -> np.ndarray:
+            '''
+            Filters a set of gene pairs to only include pairs where both genes are not in the positive gene set
+            '''
+            return np.array([pair for pair in pairs if pair[0] not in posGenes and pair[1] not in posGenes],dtype='U10')
 
-        def evaluateTermPerformance(termIndex,posGenes,geneSet,negPairs) -> pd.DataFrame:
+        def evaluateTermPerformance(termIndex,posGenes,geneSet,negPairs,maxPos=1000) -> pd.DataFrame:
             '''
             Helper function that evaluates a GO term's performance on a set of genes (the testing genes or training genes)
             '''
 
             # if a term has less than 5 positive genes in the gene set, the performance evaluation will be uninformative, so return None
-            if len(posGenes.intersection(geneSet)) < 5:
+            posFoldGenes = posGenes.intersection(geneSet)
+            if len(posFoldGenes) < 5:
                 return None
             
             # Intialize list of all pairs of genes (in the gene set) that are co-annotated to the term, and take a random sample of at most 10,000 pairs
-            posPairs = np.array([[geneA, geneB] for geneA in posGenes for geneB in geneSet if validPair(geneA, geneB, geneSet)],dtype='U10')
+            
+            posPairs = np.array([[geneA, geneB] for geneA in posFoldGenes for geneB in posFoldGenes if geneA < geneB],dtype='U10')
             np.random.shuffle(posPairs)
-            posPairs = posPairs[:min(10000,len(posPairs))]
+            posPairs = posPairs[:min(maxPos,len(posPairs))]
 
             # Take a random sample of negative pairs that is at most 10 times the size of the positive pairs
             np.random.shuffle(negPairs)
+            negPairs = filterNegativePairs(negPairs,posGenes)
             negPairs = negPairs[:min(10*len(posPairs),len(negPairs))]
 
             # Compute confidence values for each pair of genes
@@ -372,7 +378,7 @@ class PredictionModel():
                     print(outputs.element_size() * outputs.nelement() / 1_000_000, 'MB of memory used for outputs')
                     confidenceValues[agnosticIndices[start:end]] += outputs.cpu()
 
-                    confidenceValues[agnosticIndices[start:end]] /= self.numFolds
+            confidenceValues[agnosticIndices] /= self.numFolds
 
             torch.save(confidenceValues,f'{self.modelFolder}/FunctionalRelationshipGraph.pth')
 
@@ -385,6 +391,7 @@ class PredictionModel():
         summary = []
         for i, (term, termGenes) in enumerate(self.terms):
             scoreDict = {gene: 0 for gene in self.allGenes}
+            
 
             pairs = np.array([[geneA,geneB] for geneA in self.allGenes for geneB in termGenes if (geneA not in termGenes or geneA < geneB)],dtype='U10')
             indices = [self.expressionData.genePairIndex(pair[0],pair[1]) for pair in pairs]
@@ -398,14 +405,17 @@ class PredictionModel():
 
             scores = []
             for gene, score in scoreDict.items():
-                print(gene,score)
+                # print(gene,score)
                 label = None
                 if gene in termGenes:
                     label = 1
+                    averageScore = score / (len(termGenes) - 1)
                 elif gene in self.goldStandard:
                     label = -1
+                    averageScore = score / len(termGenes)
                 else:
                     label = 0
+                    averageScore = score / len(termGenes)
                 scores.append([gene,score.item(),label])
             scores = pd.DataFrame(scores, columns=['Gene','Confidence Value','Label']) # Sort by score in descending order
             
@@ -442,14 +452,13 @@ class PredictionModel():
         '''
 
         # Sort the table by confidence values in descending order
-        # table = table[table[:,score].argsort()[::-1]]
         table.sort_values('Confidence Value',axis=0,ascending=False,inplace=True)
 
         truePositives = 0
         falsePositives = 0
         trueNegatives = sum(table['Label'] == -1)
         falseNegatives = sum(table['Label'] == 1)
-        print('True Positives:', truePositives, 'False Positives:', falsePositives, 'True Negatives:', trueNegatives, 'False Negatives:', falseNegatives)
+        # print('True Positives:', truePositives, 'False Positives:', falsePositives, 'True Negatives:', trueNegatives, 'False Negatives:', falseNegatives)
 
         def calculateStatistics():
             falsePositiveRate = falsePositives / (falsePositives + trueNegatives)
@@ -458,9 +467,9 @@ class PredictionModel():
             return np.array([falsePositiveRate,recall,precision])
 
 
-        confusionMatrixStatistics = np.ndarray((len(table),3),dtype=object)
+        confusionMatrixStatistics = np.ndarray((len(table),3),dtype=np.float32)
 
-        for i, row in table.iterrows():
+        for i ,(_, row) in enumerate(table.iterrows()):            
             if row['Label'] == 1:
                 truePositives += 1
                 falseNegatives -= 1
@@ -470,9 +479,11 @@ class PredictionModel():
 
             confusionMatrixStatistics[i] = calculateStatistics()
 
+
         table['False Positive Rate'] = confusionMatrixStatistics[:,0]
         table['Recall'] = confusionMatrixStatistics[:,1]
         table['Precision'] = confusionMatrixStatistics[:,2]
+
         
         return table
     
@@ -609,11 +620,6 @@ class PredictionModel():
         indices = torch.IntTensor([self.expressionData.genePairIndex(pair[0],pair[1]) for pair in batch])
 
         features = self.expressionData.correlationDictionary.index_select(0,indices).float()
-
-        # features = np.zeros(shape=(len(batch),self.expressionData.numDatasets),dtype=np.float32)
-        # for i, pair in enumerate(batch):
-        #     geneA, geneB = pair
-        #     features[i] = self.expressionData.similarityVector(geneA,geneB)
 
         return features
     
