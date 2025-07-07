@@ -62,6 +62,7 @@ class PredictionModel():
 
         # Initalize model parameters to fields
         self.numFolds = numFolds
+        self.ontologyDate = ontologyDate
 
         # Create Gene Ontology parser and get GO slim terms
         self.parser = GOParser(ontologyDate)
@@ -140,6 +141,8 @@ class PredictionModel():
         trainGenes, testGenes = self.getDataSplit(fold)
         trainPosPairs, trainNegPairs = self.splitPosNegPairs(trainGenes)
         testPosPairs, testNegPairs = self.splitPosNegPairs(testGenes)
+
+        print('Here')
 
         np.random.shuffle(trainPosPairs); np.random.shuffle(trainNegPairs)
         np.random.shuffle(testPosPairs); np.random.shuffle(testNegPairs)
@@ -399,9 +402,9 @@ class PredictionModel():
 
             for j in range(len(pairs)):
                 if pairs[j][0] in termGenes:
-                    scoreDict[pairs[j][1]] += confidenceValues[j]
+                    scoreDict[pairs[j][1]] += confidenceValues[j].item()
                 if pairs[j][1] in termGenes:
-                    scoreDict[pairs[j][0]] += confidenceValues[j]
+                    scoreDict[pairs[j][0]] += confidenceValues[j].item()
 
             scores = []
             for gene, score in scoreDict.items():
@@ -416,7 +419,7 @@ class PredictionModel():
                 else:
                     label = 0
                     averageScore = score / len(termGenes)
-                scores.append([gene,score.item(),label])
+                scores.append([gene,averageScore,label])
             scores = pd.DataFrame(scores, columns=['Gene','Confidence Value','Label']) # Sort by score in descending order
             
 
@@ -571,16 +574,17 @@ class PredictionModel():
 
         geneSet = set(genes)
 
-        smallestCommonAncestorFile = os.path.dirname(__file__) + '/../data/Pairs_SmallestCommonAncestor.npy'
-        allPairs = np.load(smallestCommonAncestorFile,allow_pickle=True)
+
+
+        smallestCommonAncestors = self.loadSmallestCommonAncestorFile()
         smallestCommonAncestorThreshold = 0.1 * len(self.allGenes) # the maximum number of annotations a pair's smallest common ancestor term can have to be considereed a negative pair
 
         # Iterate through all pairs of genes
-        for pair in allPairs:
-            
-            geneA = pair[0]
-            geneB = pair[1]
-            smallestCommonAncestor = pair[2]
+        for row in smallestCommonAncestors:
+
+            geneA = self.expressionData.geneIndexRev[row[0]]
+            geneB = self.expressionData.geneIndexRev[row[1]]
+            smallestCommonAncestor = row[2]
             if geneA in geneSet and geneB in geneSet:
                 if self.coannotated(geneA,geneB):
                     posPairs.append((geneA,geneB))
@@ -638,7 +642,43 @@ class PredictionModel():
                     label.append(0)
             labels.append(label)
         return torch.tensor(labels,dtype=torch.float32)
+    
+    def loadSmallestCommonAncestorFile(self) -> np.ndarray:
+        '''
+        Loads (or creates) a file containing the size of the smallest common ancestor term for each pair of genes in the yeast genome for a given ontology date
+        '''
 
+        packageDir = os.path.dirname(__file__) + '/..'
+        smallestCommonAncestorFile = f'{packageDir}/data/SmallestCommonAncestor/{self.ontologyDate}.npy'
+
+        # If file already exists, load it
+        if os.path.exists(smallestCommonAncestorFile):
+            return np.load(smallestCommonAncestorFile,allow_pickle=True)
+    
+        # Initialize all pairs of genes in the yeast genome, then calculate the smallest common ancestor for each pair
+        print(f'Calculating smallest common ancestor for all pairs of genes with {self.ontologyDate} ontology date. This process may take a while...')
+
+        
+        allPairs = np.array([[self.expressionData.geneIndex[i],self.expressionData.geneIndex[j],0] for i in self.goldStandard for j in self.goldStandard if i < j],dtype=np.int32)
+
+        for i, pair in enumerate(allPairs):
+            if i % 10000 == 0: print(i, 'pairs processed')
+            geneA, geneB = self.expressionData.geneIndexRev[pair[0]], self.expressionData.geneIndexRev[pair[1]]
+            smallestCommonAncestor = self.parser.smallestCommonAncestor(geneA,geneB)
+            allPairs[i][2] = smallestCommonAncestor
+
+        
+        np.save(smallestCommonAncestorFile, allPairs, allow_pickle=True)
+        print('Smallest common ancestor file saved to', smallestCommonAncestorFile)
+        return allPairs
+    
+    def convertsma(self):
+        packageDir = os.path.dirname(__file__) + '/..'
+        smallestCommonAncestorFile = f'{packageDir}/data/SmallestCommonAncestor/{self.ontologyDate}.npy'
+        sma = np.load(smallestCommonAncestorFile, allow_pickle=True)
+        
+
+        np.save(smallestCommonAncestorFile, sma.astype(np.int16), allow_pickle=True)
     # ---------------------------------------------------------------------------------- #
     # ----------------------------------- Unit Tests ----------------------------------- #
     # ---------------------------------------------------------------------------------- #

@@ -32,6 +32,7 @@ class GeneExpressionData():
         geneIndices = pd.read_csv(f'{self.packageDir}/data/AllYeastGenes.csv').to_numpy()
         self.genes = [gene[0] for gene in geneIndices]
         self.geneIndex = {gene[0]: gene[1] for gene in geneIndices}
+        self.geneIndexRev = {v: k for k, v in self.geneIndex.items()}
 
         n = len(self.genes)
 
@@ -80,7 +81,7 @@ class GeneExpressionData():
         Arguments:
             -file - name of the dataset file to create the correlation dictionary for
         '''
-        print(f'Creating correlation dictionary for {file}...')
+        print(f'Creating correlation dictionary for {file}, this may take a while...')
 
         # Read in expression data from file, then filter unnecessary columns and rows
         data = pd.read_csv(f'{self.packageDir}/data/GeneExpression/Datasets/{file}',sep='\t')
@@ -111,8 +112,10 @@ class GeneExpressionData():
                 pairDictionary[self.genePairIndex(geneA,geneB)] = p
 
         # Normalize the pairDictionary
-        mean = np.mean(pairDictionary)
-        std = np.std(pairDictionary)
+
+        np.random.shuffle(pairDictionary)  # Shuffle the pairDictionary to ensure randomness in normalization
+        mean = np.mean(pairDictionary[:200000])
+        std = np.std(pairDictionary[:200000])
         pairDictionary = (pairDictionary - mean) / std
 
         # Save the pairDictionary to a file
@@ -166,7 +169,6 @@ class GeneExpressionData():
         r = max(a,b)
         c = min(a,b)
 
-        # index = (c + (r * len(self.genes))) - ((r*(r-1)) // 2)
         index = (r + (c * len(self.genes))) - ((c*(c-1)) // 2)
         
         return index
@@ -176,7 +178,6 @@ class GeneExpressionData():
         Returns the z-score vector between two genes in all datasets.
         '''
         return self.correlationDictionary[self.genePairIndex(geneA,geneB)]
-    
     
     
     def countExperimentalConditions(self,file:str) -> int:
