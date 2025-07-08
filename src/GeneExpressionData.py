@@ -23,23 +23,17 @@ class GeneExpressionData():
         '''
         self.packageDir = os.path.dirname(__file__) + '/..'
 
-        # If I get the time, I would like to implement this in a different way
-
-        # self.genes = list(genes)
-        # sorted(self.genes)
-        # self.geneIndex = {gene:i for i,gene in enumerate(genes)}
+    
 
         geneIndices = pd.read_csv(f'{self.packageDir}/data/AllYeastGenes.csv').to_numpy()
         self.genes = [gene[0] for gene in geneIndices]
         self.geneIndex = {gene[0]: gene[1] for gene in geneIndices}
         self.geneIndexRev = {v: k for k, v in self.geneIndex.items()}
 
+        
+
+        # calculate the total number of pairs in the yeast genome give the number of genes
         n = len(self.genes)
-
-        # It seems like my original implementation did not use self pairs
-        # self.pairsLen = ((n*(n-1)) // 2)
-
-        # I'm not sure why the original implementation adds 2 n instead of 1 n, but for now, I just need to make sure the program is running
         self.pairsLen = ((n*(n-1)) // 2) + 2 *n
 
 
@@ -71,6 +65,7 @@ class GeneExpressionData():
         for i,file in enumerate(files):
             self.correlationDictionary[:,i] = np.load(f'{self.packageDir}/data/GeneExpression/CorrelationDictionaries/{file}_corrDict.npy')
 
+        # Convert the correlation dictionary into a PyTorch tensor for faster access to each gene pair's features
         self.correlationDictionary = torch.from_numpy(self.correlationDictionary.astype(np.float16))
 
 
@@ -94,25 +89,20 @@ class GeneExpressionData():
         for row in expData:
             expDictionary[row[0]] = row[1:].astype(np.float16)
 
-        # Initliaze 1D lookup array for gene pair correlation values
-        
+        genesInDataset = list(set(expDictionary.keys()).intersection(self.genes))  # Get genes that are in both the dataset and the genes list
+
+        pairsInDataset = [(geneA,geneB) for geneA in genesInDataset for geneB in genesInDataset if geneA < geneB]
+        indices = np.array([self.genePairIndex(geneA,geneB) for geneA,geneB in pairsInDataset],dtype=np.int32)
+
+        # Initialize 1D lookup array for gene pair correlation values
+
         pairDictionary = np.zeros((self.pairsLen,),dtype=np.float16)
 
-        # Calculate Pearson correlation for all pairs of genes
-        for i in range(len(self.genes)):
-            print(i)
-            for j in range(i,len(self.genes)):
-                geneA = self.genes[i]
-                geneB = self.genes[j]
-                # If both genes are present in the dataset, calculate the Pearson correlation between them. Otherwise, set the correlation to 0
-                if geneA in expDictionary and geneB in expDictionary:
-                    p = self.customCorrelation(expDictionary[geneA],expDictionary[geneB])
-                else:
-                    p = 0
-                pairDictionary[self.genePairIndex(geneA,geneB)] = p
+        pearsonCorrelations = np.array([self.customCorrelation(expDictionary[geneA],expDictionary[geneB]) for geneA,geneB in pairsInDataset],dtype=np.float16)
 
-        # Normalize the pairDictionary
+        pairDictionary[indices] = pearsonCorrelations
 
+        print('Normalizing correlation dictionary...')
         np.random.shuffle(pairDictionary)  # Shuffle the pairDictionary to ensure randomness in normalization
         mean = np.mean(pairDictionary[:200000])
         std = np.std(pairDictionary[:200000])
