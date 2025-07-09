@@ -15,11 +15,19 @@ To make single-gene functional predictions with our method, follow these steps:
 We have provided a demo in `src/demo.py` which performs all of the steps in the list above with the deafult hyperparameters and training time described in McGuire and Hibbs 2025.
 
 ## Usage
+### Setting up virtual environment
 This project uses virtual environments with conda to manage package dependencies. To initalize the virtual environment needed to run this project, use the following commands from within the yeast-coexpression-afp directory:
 ```
 conda env create -f environment.yml
 conda activate yeast-coexpression-afp
 ```
+
+### Downloading datasets
+To run this project, you need to download the gene expression and Gene Ontology used to create our model's input features and training labels. This data is available for download on Zenodo. To prepare this repository's data, complete the following step:
+
+1. Download `data.tar.gz` from this [Zenodo link](https://doi.org/10.5281/zenodo.15831976)
+2. Place this file in the top level of the `yeast-coexpression-afp` repository directory
+3. Run `tar -xzvf data.tar.gz` from the `yeast-coexpression-afp` directory. This will extract the tar ball file into a `data` directory with all files already organized into their respective subfolder.
 
 ## Original Implementation
 The original implementation of the methodolgy found in McGuire and Hibbs 2025 can be found in [yeast-coexpression-afp-original](https://github.com:cmcguir1/yeast-coexpression-afp-original). The original implementation of these algorithms were very computationally inefficient. This new repository was created to provide computationally efficient implementations of our methodologies and an easy to set up virtual environment to improve the reproducability of our results.
