@@ -26,8 +26,6 @@ conda activate yeast-coexpression-afp
 To run this project, you need to download the gene expression and Gene Ontology used to create our model's input features and training labels. This data is available for download on Zenodo. To prepare this repository's data, complete the following step:
 
 1. Download `data.tar.gz` from this [Zenodo link](https://doi.org/10.5281/zenodo.15831976)
-2. Place this file in the top level of the `yeast-coexpression-afp` repository directory
-3. Run `tar -xzvf data.tar.gz` from the `yeast-coexpression-afp` directory. This will extract the tar ball file into a `data` directory with all files already organized into their respective subfolder.
-
-## Original Implementation
-The original implementation of the methodolgy found in McGuire and Hibbs 2025 can be found in [yeast-coexpression-afp-original](https://github.com:cmcguir1/yeast-coexpression-afp-original). The original implementation of these algorithms were very computationally inefficient. This new repository was created to provide computationally efficient implementations of our methodologies and an easy to set up virtual environment to improve the reproducability of our results.
+    - NOTE: This contains the processed version of the original data files available from the Saccharomyces Genome Database gene expression [repository](http://sgd-archive.yeastgenome.org/expression/microarray/).
+3. Place this file in the top level of the `yeast-coexpression-afp` repository directory
+4. Run `tar -xzvf data.tar.gz` from the `yeast-coexpression-afp` directory. This will extract the tar ball file into a `data` directory with all files already organized into their respective subfolder.
