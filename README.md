@@ -12,7 +12,7 @@ To make single-gene functional predictions with our method, follow these steps:
 - Make predictions for all pairs of genes in the yeast genome with the `constructFunctionalRelationshipGraph` method
 - Aggreate pairwise predictions from functional relationship graph to rank individual genes by their predicted involvement in 79 GO terms with `singleGeneRankings` method
 ### Demo
-We have provided a demo in `src/demo.py` which performs all of the steps in the list above with the deafult hyperparameters and training time described in McGuire and Hibbs 2025.
+We have provided a demo in `src/demo.py` which performs all of the steps in the list above with the deafult hyperparameters and training time described in McGuire and Hibbs 2026.
 
 ## Usage
 ### Setting up virtual environment
